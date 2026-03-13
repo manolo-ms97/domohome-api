@@ -14,7 +14,6 @@ CREATE TABLE IF NOT EXISTS `products` (
   `type`         VARCHAR(100)    DEFAULT NULL  COMMENT 'Sub-type within category',
   `barcode`      VARCHAR(100)    DEFAULT NULL  COMMENT 'EAN / UPC barcode',
   `price_ex_tax` DECIMAL(12,2)   NOT NULL      COMMENT 'List price without tax (MXN)',
-  `price_inc_tax` DECIMAL(12,2)  NOT NULL      COMMENT 'List price with tax (MXN)',
   `unit`         VARCHAR(50)     NOT NULL DEFAULT 'piece',
   `stock`        INT UNSIGNED    NOT NULL DEFAULT 0,
   `image_filename` VARCHAR(255)  DEFAULT NULL  COMMENT 'Filename inside products_images/',

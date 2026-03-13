@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS `clients` (
   `phone`      VARCHAR(30)     DEFAULT NULL,
   `address`    TEXT            DEFAULT NULL,
   `source`     VARCHAR(50)     NOT NULL DEFAULT 'manual' COMMENT 'Origin: manual (CRM), b2b, b2c, etc.',
+  `tier`       VARCHAR(50)     DEFAULT NULL COMMENT 'Client segment: distribuidor, integrador, cliente_final, etc.',
   `created_at` DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),

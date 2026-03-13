@@ -450,6 +450,193 @@ app.delete("/downloadables/:id", requireAuth, requireAdmin, async (req, res) => 
   }
 });
 
+// ─── Products (read for pickers) ───────────────────────────────────────────────
+
+app.get("/products", requireAuth, async (_req, res) => {
+  try {
+    const [rows] = await pool.promise().query(
+      "SELECT unique_id, brand, code, description, price_ex_tax FROM products WHERE status = 'PUBLISHED' ORDER BY brand, code"
+    );
+    return res.status(200).json(rows);
+  } catch (err) {
+    console.error("GET /products error:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// ─── Clients ───────────────────────────────────────────────────────────────────
+
+app.get("/clients", requireAuth, async (_req, res) => {
+  try {
+    const [rows] = await pool.promise().query(
+      "SELECT unique_id, name, rfc, email, phone, address, source, tier, created_at FROM clients ORDER BY name"
+    );
+    return res.status(200).json(rows);
+  } catch (err) {
+    console.error("GET /clients error:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+app.post("/clients", requireAuth, async (req, res) => {
+  try {
+    const { name, rfc, email, phone, address, source, tier } = req.body;
+    if (!name?.trim())
+      return res.status(400).json({ message: "name is required" });
+    if (!email?.trim() && !phone?.trim())
+      return res.status(400).json({ message: "email or phone is required" });
+
+    const unique_id = crypto.randomUUID();
+    await pool.promise().query(
+      "INSERT INTO clients (unique_id, name, rfc, email, phone, address, source, tier) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      [unique_id, name.trim(), rfc?.trim() || null, email?.trim() || null, phone?.trim() || null, address?.trim() || null, source || "manual", tier?.trim() || null]
+    );
+    const [rows] = await pool.promise().query(
+      "SELECT unique_id, name, rfc, email, phone, address, source, tier, created_at FROM clients WHERE unique_id = ?",
+      [unique_id]
+    );
+    return res.status(201).json(rows[0]);
+  } catch (err) {
+    console.error("POST /clients error:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+app.put("/clients/:id", requireAuth, async (req, res) => {
+  try {
+    const { name, rfc, email, phone, address, source, tier } = req.body;
+    const fields = [];
+    const values = [];
+    if (name !== undefined)    { fields.push("name = ?");    values.push(name.trim()); }
+    if (rfc !== undefined)     { fields.push("rfc = ?");     values.push(rfc?.trim() || null); }
+    if (email !== undefined)   { fields.push("email = ?");   values.push(email?.trim() || null); }
+    if (phone !== undefined)   { fields.push("phone = ?");   values.push(phone?.trim() || null); }
+    if (address !== undefined) { fields.push("address = ?"); values.push(address?.trim() || null); }
+    if (source !== undefined)  { fields.push("source = ?");  values.push(source); }
+    if (tier !== undefined)    { fields.push("tier = ?");    values.push(tier?.trim() || null); }
+    if (fields.length === 0)
+      return res.status(400).json({ message: "No fields to update" });
+
+    values.push(req.params.id);
+    const [result] = await pool.promise().query(
+      `UPDATE clients SET ${fields.join(", ")} WHERE unique_id = ?`, values
+    );
+    if (result.affectedRows === 0)
+      return res.status(404).json({ message: "Client not found" });
+    return res.status(200).json({ message: "Updated" });
+  } catch (err) {
+    console.error("PUT /clients/:id error:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+app.delete("/clients/:id", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const [result] = await pool.promise().query(
+      "DELETE FROM clients WHERE unique_id = ?", [req.params.id]
+    );
+    if (result.affectedRows === 0)
+      return res.status(404).json({ message: "Client not found" });
+    return res.status(200).json({ message: "Deleted" });
+  } catch (err) {
+    console.error("DELETE /clients/:id error:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// ─── Client Special Prices ─────────────────────────────────────────────────────
+
+app.get("/clients/:id/special-prices", requireAuth, async (req, res) => {
+  try {
+    const [rows] = await pool.promise().query(
+      `SELECT csp.unique_id, csp.client_id, csp.product_id,
+              p.code AS product_code, p.description AS product_description, p.brand AS product_brand,
+              p.price_ex_tax AS list_price_ex_tax,
+              csp.price_ex_tax, csp.notes, csp.valid_until
+       FROM client_special_prices csp
+       LEFT JOIN products p ON p.unique_id = csp.product_id
+       WHERE csp.client_id = ?
+       ORDER BY p.brand, p.code`,
+      [req.params.id]
+    );
+    return res.status(200).json(rows);
+  } catch (err) {
+    console.error("GET /clients/:id/special-prices error:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+app.post("/clients/:id/special-prices", requireAuth, async (req, res) => {
+  try {
+    const { product_id, price_ex_tax, notes, valid_until } = req.body;
+    if (!product_id)
+      return res.status(400).json({ message: "product_id is required" });
+    if (price_ex_tax == null)
+      return res.status(400).json({ message: "price_ex_tax is required" });
+
+    const unique_id = crypto.randomUUID();
+    await pool.promise().query(
+      "INSERT INTO client_special_prices (unique_id, client_id, product_id, price_ex_tax, notes, valid_until) VALUES (?, ?, ?, ?, ?, ?)",
+      [unique_id, req.params.id, product_id, price_ex_tax, notes?.trim() || null, valid_until || null]
+    );
+    const [rows] = await pool.promise().query(
+      `SELECT csp.unique_id, csp.client_id, csp.product_id,
+              p.code AS product_code, p.description AS product_description, p.brand AS product_brand,
+              p.price_ex_tax AS list_price_ex_tax,
+              csp.price_ex_tax, csp.notes, csp.valid_until
+       FROM client_special_prices csp
+       LEFT JOIN products p ON p.unique_id = csp.product_id
+       WHERE csp.unique_id = ?`,
+      [unique_id]
+    );
+    return res.status(201).json(rows[0]);
+  } catch (err) {
+    if (err.code === "ER_DUP_ENTRY")
+      return res.status(409).json({ message: "Ya existe un precio especial para este producto" });
+    console.error("POST /clients/:id/special-prices error:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+app.put("/clients/:id/special-prices/:priceId", requireAuth, async (req, res) => {
+  try {
+    const { price_ex_tax, notes, valid_until } = req.body;
+    const fields = [];
+    const values = [];
+    if (price_ex_tax !== undefined) { fields.push("price_ex_tax = ?"); values.push(price_ex_tax); }
+    if (notes !== undefined)        { fields.push("notes = ?");        values.push(notes?.trim() || null); }
+    if (valid_until !== undefined)  { fields.push("valid_until = ?");  values.push(valid_until || null); }
+    if (fields.length === 0)
+      return res.status(400).json({ message: "No fields to update" });
+
+    values.push(req.params.priceId);
+    const [result] = await pool.promise().query(
+      `UPDATE client_special_prices SET ${fields.join(", ")} WHERE unique_id = ?`, values
+    );
+    if (result.affectedRows === 0)
+      return res.status(404).json({ message: "Special price not found" });
+    return res.status(200).json({ message: "Updated" });
+  } catch (err) {
+    console.error("PUT /clients/:id/special-prices/:priceId error:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+app.delete("/clients/:id/special-prices/:priceId", requireAuth, async (req, res) => {
+  try {
+    const [result] = await pool.promise().query(
+      "DELETE FROM client_special_prices WHERE unique_id = ? AND client_id = ?",
+      [req.params.priceId, req.params.id]
+    );
+    if (result.affectedRows === 0)
+      return res.status(404).json({ message: "Special price not found" });
+    return res.status(200).json({ message: "Deleted" });
+  } catch (err) {
+    console.error("DELETE /clients/:id/special-prices/:priceId error:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 // ─── Start ─────────────────────────────────────────────────────────────────────
 
 app.listen(3001, () => console.log("DomoHome API running on http://localhost:3001"));

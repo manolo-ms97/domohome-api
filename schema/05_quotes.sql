@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS `quotes` (
   `client_name_snapshot`      VARCHAR(255)  DEFAULT NULL,
   `client_tax_id_snapshot`    VARCHAR(20)   DEFAULT NULL COMMENT 'RFC — Mexican business tax ID',
   `client_address_snapshot`   TEXT          DEFAULT NULL,
+  `client_email_snapshot`     VARCHAR(255)  DEFAULT NULL,
+  `client_phone_snapshot`     VARCHAR(30)   DEFAULT NULL,
   `date`                      DATE          NOT NULL,
   `expiry_date`               DATE          DEFAULT NULL COMMENT '30 days after date',
   `subtotal`                  DECIMAL(12,2) NOT NULL COMMENT 'Before tax',
