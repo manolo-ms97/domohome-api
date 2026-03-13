@@ -143,7 +143,7 @@ app.post("/auth/login", async (req, res) => {
       maxAge: REFRESH_DAYS * 24 * 60 * 60 * 1000,
     });
 
-    return res.status(200).json({ accessToken, username: user.username, role: user.role });
+    return res.status(200).json({ accessToken, username: user.username, role: user.role, unique_id: user.unique_id });
   } catch (err) {
     console.error("auth login error:", err);
     return res.status(500).json({ message: "Internal server error" });
@@ -178,7 +178,7 @@ app.post("/auth/refresh", async (req, res) => {
 
     const accessToken = signAccessToken(user);
 
-    return res.status(200).json({ accessToken, username: user.username, role: user.role });
+    return res.status(200).json({ accessToken, username: user.username, role: user.role, unique_id: user.unique_id });
   } catch (err) {
     console.error("auth refresh error:", err);
     return res.status(500).json({ message: "Internal server error" });
@@ -633,6 +633,146 @@ app.delete("/clients/:id/special-prices/:priceId", requireAuth, async (req, res)
     return res.status(200).json({ message: "Deleted" });
   } catch (err) {
     console.error("DELETE /clients/:id/special-prices/:priceId error:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+// ─── Quotes ────────────────────────────────────────────────────────────────────
+
+app.get("/quotes", requireAuth, async (_req, res) => {
+  try {
+    const [rows] = await pool.promise().query(
+      `SELECT q.unique_id, q.quote_number, q.client_name_snapshot,
+              q.date, q.expiry_date, q.subtotal, q.tax_rate, q.tax_amount, q.total,
+              q.status, q.created_by,
+              COUNT(qi.id) AS items_count
+       FROM quotes q
+       LEFT JOIN quote_items qi ON qi.quote_id = q.id
+       GROUP BY q.id
+       ORDER BY q.created_at DESC`
+    );
+    return res.status(200).json(rows);
+  } catch (err) {
+    console.error("GET /quotes error:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+app.get("/quotes/:id", requireAuth, async (req, res) => {
+  try {
+    const [qRows] = await pool.promise().query(
+      "SELECT * FROM quotes WHERE unique_id = ?",
+      [req.params.id]
+    );
+    if (!qRows[0]) return res.status(404).json({ message: "Quote not found" });
+    const [items] = await pool.promise().query(
+      "SELECT * FROM quote_items WHERE quote_id = ? ORDER BY id",
+      [qRows[0].id]
+    );
+    return res.status(200).json({ ...qRows[0], items });
+  } catch (err) {
+    console.error("GET /quotes/:id error:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+app.post("/quotes", requireAuth, async (req, res) => {
+  const conn = await pool.promise().getConnection();
+  try {
+    const {
+      quote_number, client_id, client_name_snapshot, client_tax_id_snapshot,
+      client_address_snapshot, expiry_date, subtotal, tax_rate, tax_amount, total, items = [],
+    } = req.body;
+
+    if (!quote_number) return res.status(400).json({ message: "quote_number is required" });
+    if (subtotal == null || total == null) return res.status(400).json({ message: "subtotal and total are required" });
+
+    const today = new Date();
+    const fmtDate = (d) => d.toISOString().slice(0, 10);
+    const resolvedExpiry = expiry_date || (() => { const d = new Date(today); d.setDate(d.getDate() + 30); return fmtDate(d); })();
+    const created_by = req.user.sub;
+
+    await conn.beginTransaction();
+
+    const [qResult] = await conn.query(
+      `INSERT INTO quotes (unique_id, quote_number, client_id, client_name_snapshot,
+        client_tax_id_snapshot, client_address_snapshot, date, expiry_date,
+        subtotal, tax_rate, tax_amount, total, status, created_by)
+       VALUES (UUID(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?)`,
+      [quote_number, client_id || null, client_name_snapshot || null,
+       client_tax_id_snapshot || null, client_address_snapshot || null,
+       fmtDate(today), resolvedExpiry,
+       subtotal, tax_rate ?? 0.16, tax_amount, total, created_by]
+    );
+
+    const quoteId = qResult.insertId;
+
+    if (items.length > 0) {
+      const itemRows = items.map(it => [
+        quoteId, it.product_id || null, it.product_name_snapshot,
+        it.unit_price, it.quantity, it.price_list ?? 1,
+        it.line_subtotal, it.line_tax, it.line_total,
+      ]);
+      await conn.query(
+        `INSERT INTO quote_items (quote_id, product_id, product_name_snapshot,
+           unit_price, quantity, price_list, line_subtotal, line_tax, line_total)
+         VALUES ?`,
+        [itemRows]
+      );
+    }
+
+    await conn.commit();
+
+    const [[created]] = await conn.query(
+      `SELECT q.unique_id, q.quote_number, q.client_name_snapshot,
+              q.date, q.expiry_date, q.subtotal, q.tax_rate, q.tax_amount, q.total,
+              q.status, q.created_by, COUNT(qi.id) AS items_count
+       FROM quotes q LEFT JOIN quote_items qi ON qi.quote_id = q.id
+       WHERE q.id = ? GROUP BY q.id`,
+      [quoteId]
+    );
+    return res.status(201).json(created);
+  } catch (err) {
+    await conn.rollback();
+    if (err.code === "ER_DUP_ENTRY")
+      return res.status(409).json({ message: "Quote number already exists" });
+    console.error("POST /quotes error:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  } finally {
+    conn.release();
+  }
+});
+
+app.patch("/quotes/:id/status", requireAuth, async (req, res) => {
+  try {
+    const allowed = ["DRAFT", "SENT", "ACCEPTED", "REJECTED", "EXPIRED"];
+    const { status } = req.body;
+    if (!allowed.includes(status))
+      return res.status(400).json({ message: "Invalid status value" });
+    const [result] = await pool.promise().query(
+      "UPDATE quotes SET status = ? WHERE unique_id = ?",
+      [status, req.params.id]
+    );
+    if (result.affectedRows === 0)
+      return res.status(404).json({ message: "Quote not found" });
+    return res.status(200).json({ message: "Updated" });
+  } catch (err) {
+    console.error("PATCH /quotes/:id/status error:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+app.delete("/quotes/:id", requireAuth, async (req, res) => {
+  try {
+    const [result] = await pool.promise().query(
+      "DELETE FROM quotes WHERE unique_id = ?",
+      [req.params.id]
+    );
+    if (result.affectedRows === 0)
+      return res.status(404).json({ message: "Quote not found" });
+    return res.status(200).json({ message: "Deleted" });
+  } catch (err) {
+    console.error("DELETE /quotes/:id error:", err);
     return res.status(500).json({ message: "Internal server error" });
   }
 });

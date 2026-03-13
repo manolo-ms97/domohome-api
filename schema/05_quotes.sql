@@ -25,11 +25,13 @@ CREATE TABLE IF NOT EXISTS `quotes` (
   `total`                     DECIMAL(12,2) NOT NULL COMMENT 'subtotal + tax_amount',
   `status`                    ENUM('DRAFT','SENT','ACCEPTED','REJECTED','EXPIRED') NOT NULL DEFAULT 'DRAFT',
   `pdf_filename`              VARCHAR(255)  DEFAULT NULL COMMENT 'Filename inside quotes_pdfs/',
+  `created_by`                VARCHAR(36)   DEFAULT NULL COMMENT 'FK → users.unique_id',
   `created_at`                DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at`                DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_quotes_unique_id` (`unique_id`),
   UNIQUE KEY `uq_quotes_number` (`quote_number`),
   KEY `idx_quotes_client_id` (`client_id`),
-  KEY `idx_quotes_status` (`status`)
+  KEY `idx_quotes_status` (`status`),
+  KEY `idx_quotes_created_by` (`created_by`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
