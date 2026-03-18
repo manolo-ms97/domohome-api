@@ -84,7 +84,10 @@ app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 // ─── Static Files ──────────────────────────────────────────────────────────────
 
 app.use("/quotes_pdfs", express.static(path.join(__dirname, "quotes_pdfs")));
-app.use("/products_images", express.static(path.join(__dirname, "products_images")));
+app.use("/products_images", (_req, res, next) => {
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  next();
+}, express.static(path.join(__dirname, "products_images")));
 
 // ─── Database Pool ─────────────────────────────────────────────────────────────
 
