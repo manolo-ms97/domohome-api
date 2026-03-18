@@ -13,6 +13,7 @@ import bcrypt from "bcrypt";
 import crypto from "crypto";
 import cookieParser from "cookie-parser";
 import XLSX from "xlsx";
+import AdmZip from "adm-zip";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -45,6 +46,15 @@ const uploadExcel = multer({
   fileFilter: (_req, file, cb) => {
     const ok = /\.(xlsx|xls)$/i.test(file.originalname);
     cb(ok ? null : new Error("Only .xlsx / .xls files are accepted"), ok);
+  },
+});
+
+const uploadZip = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 200 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ok = /\.zip$/i.test(file.originalname);
+    cb(ok ? null : new Error("Only .zip files are accepted"), ok);
   },
 });
 
@@ -537,6 +547,37 @@ app.post("/products/bulk-upload", requireAuth, uploadExcel.single("file"), async
   } finally {
     conn.release();
   }
+});
+
+// ─── Product Images Bulk Upload ────────────────────────────────────────────────
+
+app.post("/products/images/bulk-upload", requireAuth, uploadZip.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ message: "No se recibió ningún archivo" });
+
+  const ALLOWED = /\.(jpe?g|png|webp|gif)$/i;
+  const destDir = path.join(__dirname, "products_images");
+
+  let zip;
+  try {
+    zip = new AdmZip(req.file.buffer);
+  } catch {
+    return res.status(400).json({ message: "No se pudo leer el archivo ZIP" });
+  }
+
+  const entries = zip.getEntries().filter(e =>
+    !e.isDirectory && ALLOWED.test(e.name) && !e.entryName.startsWith("__MACOSX")
+  );
+
+  if (!entries.length) return res.status(400).json({ message: "El ZIP no contiene imágenes válidas" });
+
+  const saved = [];
+  for (const entry of entries) {
+    const filename = path.basename(entry.name);
+    zip.extractEntryTo(entry, destDir, false, true);
+    saved.push(filename);
+  }
+
+  return res.status(200).json({ saved: saved.length, filenames: saved });
 });
 
 // ─── Clients ───────────────────────────────────────────────────────────────────
