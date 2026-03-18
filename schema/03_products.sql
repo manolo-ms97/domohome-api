@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS `products` (
   `name`           VARCHAR(255)    DEFAULT NULL  COMMENT 'Short product display name',
   `brand`          VARCHAR(255)    DEFAULT NULL  COMMENT 'Brand / supplier company',
   `code`           VARCHAR(100)    DEFAULT NULL  COMMENT 'Product code (SKU equivalent)',
+  `sku`            VARCHAR(100)    DEFAULT NULL  COMMENT 'Internal product ID',
   `description`    TEXT            DEFAULT NULL,
   `category`       VARCHAR(100)    DEFAULT NULL  COMMENT 'e.g. Sensors, Cameras',
   `price_list`     DECIMAL(12,2)   NOT NULL      COMMENT 'List price without tax (MXN)',

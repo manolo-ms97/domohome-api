@@ -466,7 +466,7 @@ app.delete("/downloadables/:id", requireAuth, requireAdmin, async (req, res) => 
 app.get("/products", requireAuth, async (_req, res) => {
   try {
     const [rows] = await pool.promise().query(
-      "SELECT unique_id, name, brand, code, description, price_list FROM products WHERE status = 'PUBLISHED' ORDER BY brand, code"
+      "SELECT unique_id, name, brand, code, sku, description, category, price_list FROM products WHERE status = 'PUBLISHED' ORDER BY brand, code"
     );
     return res.status(200).json(rows);
   } catch (err) {
@@ -494,6 +494,7 @@ app.post("/products/bulk-upload", requireAuth, uploadExcel.single("file"), async
       String(r["name"] ?? "").trim() || null,
       r["brand"] ?? null,
       String(r["code"] ?? "").trim(),
+      String(r["sku"] ?? "").trim() || null,
       r["description"] ?? null,
       r["category"] ?? null,
       r["image_filename"] ?? null,
@@ -509,11 +510,12 @@ app.post("/products/bulk-upload", requireAuth, uploadExcel.single("file"), async
     await conn.beginTransaction();
 
     const sql = `
-      INSERT INTO products (name, brand, code, description, category, image_filename, price_list, stock)
+      INSERT INTO products (name, brand, code, sku, description, category, image_filename, price_list, stock)
       VALUES ?
       ON DUPLICATE KEY UPDATE
         name           = VALUES(name),
         brand          = VALUES(brand),
+        sku            = VALUES(sku),
         description    = VALUES(description),
         category       = VALUES(category),
         image_filename = VALUES(image_filename),
