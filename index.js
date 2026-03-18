@@ -471,12 +471,38 @@ app.delete("/downloadables/:id", requireAuth, requireAdmin, async (req, res) => 
   }
 });
 
+// ─── Public Catalog (no auth) ──────────────────────────────────────────────────
+
+app.get("/catalog/products", async (_req, res) => {
+  try {
+    const [rows] = await pool.promise().query(
+      "SELECT unique_id, name, brand, code, sku, category, description, price_list, stock, image_filename FROM products WHERE status = 'PUBLISHED' ORDER BY brand, name"
+    );
+    return res.status(200).json(rows);
+  } catch (err) {
+    console.error("GET /catalog/products error:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+app.get("/catalog/brands", async (_req, res) => {
+  try {
+    const [rows] = await pool.promise().query(
+      "SELECT DISTINCT brand FROM products WHERE status = 'PUBLISHED' AND brand IS NOT NULL ORDER BY brand"
+    );
+    return res.status(200).json(rows.map(r => r.brand));
+  } catch (err) {
+    console.error("GET /catalog/brands error:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
 // ─── Products (read for pickers) ───────────────────────────────────────────────
 
 app.get("/products", requireAuth, async (_req, res) => {
   try {
     const [rows] = await pool.promise().query(
-      "SELECT unique_id, name, brand, code, sku, description, category, price_list FROM products WHERE status = 'PUBLISHED' ORDER BY brand, code"
+      "SELECT unique_id, name, brand, code, sku, description, category, price_list, stock FROM products WHERE status = 'PUBLISHED' ORDER BY brand, code"
     );
     return res.status(200).json(rows);
   } catch (err) {
