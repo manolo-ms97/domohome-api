@@ -12,6 +12,7 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
 import cookieParser from "cookie-parser";
+import XLSX from "xlsx";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -37,6 +38,15 @@ const storage = multer.diskStorage({
 });
 
 const uploads = multer({ storage });
+
+const uploadExcel = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ok = /\.(xlsx|xls)$/i.test(file.originalname);
+    cb(ok ? null : new Error("Only .xlsx / .xls files are accepted"), ok);
+  },
+});
 
 // ─── App Setup ─────────────────────────────────────────────────────────────────
 
@@ -64,6 +74,7 @@ app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 // ─── Static Files ──────────────────────────────────────────────────────────────
 
 app.use("/quotes_pdfs", express.static(path.join(__dirname, "quotes_pdfs")));
+app.use("/products_images", express.static(path.join(__dirname, "products_images")));
 
 // ─── Database Pool ─────────────────────────────────────────────────────────────
 
@@ -455,12 +466,74 @@ app.delete("/downloadables/:id", requireAuth, requireAdmin, async (req, res) => 
 app.get("/products", requireAuth, async (_req, res) => {
   try {
     const [rows] = await pool.promise().query(
-      "SELECT unique_id, brand, code, description, price_ex_tax FROM products WHERE status = 'PUBLISHED' ORDER BY brand, code"
+      "SELECT unique_id, name, brand, code, description, price_list FROM products WHERE status = 'PUBLISHED' ORDER BY brand, code"
     );
     return res.status(200).json(rows);
   } catch (err) {
     console.error("GET /products error:", err);
     return res.status(500).json({ message: "Internal server error" });
+  }
+});
+
+app.post("/products/bulk-upload", requireAuth, uploadExcel.single("file"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ message: "No se recibió ningún archivo" });
+
+  let rows;
+  try {
+    const wb = XLSX.read(req.file.buffer, { type: "buffer" });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    rows = XLSX.utils.sheet_to_json(ws, { defval: null });
+  } catch {
+    return res.status(400).json({ message: "No se pudo leer el archivo Excel" });
+  }
+
+  if (!rows.length) return res.status(400).json({ message: "La hoja está vacía" });
+
+  const records = rows
+    .map(r => [
+      String(r["name"] ?? "").trim() || null,
+      r["brand"] ?? null,
+      String(r["code"] ?? "").trim(),
+      r["description"] ?? null,
+      r["category"] ?? null,
+      r["image_filename"] ?? null,
+      parseFloat(r["price_list"] ?? 0) || 0,
+      1, // stock: all imported products are in stock
+    ])
+    .filter(r => r[2]); // code is required
+
+  if (!records.length) return res.status(400).json({ message: "No se encontraron filas válidas (code es requerido)" });
+
+  const conn = await pool.promise().getConnection();
+  try {
+    await conn.beginTransaction();
+
+    const sql = `
+      INSERT INTO products (name, brand, code, description, category, image_filename, price_list, stock)
+      VALUES ?
+      ON DUPLICATE KEY UPDATE
+        name           = VALUES(name),
+        brand          = VALUES(brand),
+        description    = VALUES(description),
+        category       = VALUES(category),
+        image_filename = VALUES(image_filename),
+        price_list     = VALUES(price_list),
+        stock          = VALUES(stock)
+    `;
+    const [result] = await conn.query(sql, [records]);
+
+    await conn.commit();
+    return res.status(200).json({
+      inserted: result.affectedRows - result.changedRows,
+      updated: result.changedRows,
+      total: records.length,
+    });
+  } catch (err) {
+    await conn.rollback();
+    console.error("POST /products/bulk-upload error:", err);
+    return res.status(500).json({ message: "Error al guardar los productos — se revirtieron todos los cambios" });
+  } finally {
+    conn.release();
   }
 });
 
